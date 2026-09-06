@@ -19,9 +19,11 @@
 #include <fcitx-utils/handlertable_details.h>
 #include <fcitx-utils/i18n.h>
 #include <fcitx-utils/key.h>
+#include <fcitx-utils/keysym.h>
 #include <fcitx-utils/library.h>
 #include <fcitx-utils/log.h>
 #include <fcitx-utils/misc.h>
+#include <fcitx-utils/signals.h>
 #include <fcitx-utils/standardpaths.h>
 #include <fcitx-utils/stringutils.h>
 #include <fcitx/action.h>
@@ -152,7 +154,10 @@ FCITX_CONFIGURATION(
         "fcitx://addon-action/addon/rime/sync?app_proto=2"};
     OptionWithAnnotation<ShiftKeyBehavior, ShiftKeyBehaviorI18NAnnotation>
         shiftKeyBehavior{this, "ShiftKeyBehavior", _("Shift Key Behavior"),
-                         ShiftKeyBehavior::DisableFcitxToggle};);
+                         ShiftKeyBehavior::DisableFcitxToggle};
+    Option<bool> latinModeNameFromSchema{
+        this, "LatinModeNameFromSchema",
+        _("Use latin mode name defined in schema"), false});
 
 class RimeEngine final : public InputMethodEngineV4Point1 {
 public:
@@ -213,6 +218,8 @@ public:
     void allowNotification(std::string type = "");
     const auto &schemas() const { return schemas_; }
     const auto &optionActions() const { return optionActions_; };
+
+    bool isCapsLockOn(InputContext *ic) const;
 
 private:
     static void rimeNotificationHandler(void *context, RimeSessionId session,
@@ -288,6 +295,7 @@ private:
     RimeSessionPool sessionPool_;
     std::thread::id mainThreadId_ = std::this_thread::get_id();
     RimeState *currentKeyEventState_ = nullptr;
+    ScopedConnection xkbStateChangedConnection_;
 };
 } // namespace fcitx::rime
 

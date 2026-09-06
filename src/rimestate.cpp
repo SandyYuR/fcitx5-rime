@@ -40,15 +40,7 @@
 
 namespace fcitx::rime {
 
-namespace {
-
-bool emptyExceptAux(const InputPanel &inputPanel) {
-
-    return inputPanel.preedit().empty() && inputPanel.preedit().empty() &&
-           (!inputPanel.candidateList() || inputPanel.candidateList()->empty());
-}
-
-} // namespace
+namespace {} // namespace
 
 RimeState::RimeState(RimeEngine *engine, InputContext &ic)
     : engine_(engine), ic_(ic) {}
@@ -82,13 +74,28 @@ void RimeState::clear() {
 
 void RimeState::activate() { maybeSyncProgramNameToSession(); }
 
+std::string RimeState::asciiModeName(bool abbrev) {
+    std::string result = _("Latin Mode");
+    if (abbrev) {
+        result = engine_->isCapsLockOn(&ic_) ? "ABC" : "abc";
+    }
+    if (engine_->config().latinModeNameFromSchema.value()) {
+        RimeStringSlice label = engine_->api()->get_state_label_abbreviated(
+            session(), "ascii_mode", True, abbrev);
+        if (label.str && label.length > 0) {
+            result.assign(label.str, label.length);
+        }
+    }
+    return result;
+}
+
 std::string RimeState::subMode() {
     std::string result;
-    getStatus([&result](const RimeStatus &status) {
+    getStatus([this, &result](const RimeStatus &status) {
         if (status.is_disabled) {
             result = "\xe2\x8c\x9b";
         } else if (status.is_ascii_mode) {
-            result = _("Latin Mode");
+            result = asciiModeName(/*abbrev=*/false);
         } else if (status.schema_name && status.schema_name[0] != '.') {
             result = status.schema_name;
         }
@@ -98,11 +105,12 @@ std::string RimeState::subMode() {
 
 std::string RimeState::subModeLabel() {
     std::string result;
-    getStatus([&result](const RimeStatus &status) {
+
+    getStatus([this, &result](const RimeStatus &status) {
         if (status.is_disabled) {
             result = "";
         } else if (status.is_ascii_mode) {
-            result = "A";
+            result = asciiModeName(/*abbrev=*/true);
         } else if (status.schema_name && status.schema_name[0] != '.') {
             result = status.schema_name;
             // if (!result.empty() &&
@@ -388,7 +396,6 @@ void RimeState::updateUI(InputContext *ic, bool keyRelease) {
     if (!keyRelease) {
         inputPanel.reset();
     }
-    bool oldEmptyExceptAux = emptyExceptAux(inputPanel);
 
     do {
         auto *api = engine_->api();
@@ -418,21 +425,12 @@ void RimeState::updateUI(InputContext *ic, bool keyRelease) {
     } while (false);
 
     ic->updatePreedit();
-    // HACK: for show input method information.
-    // Since we don't use aux, which is great for this hack.
-    bool newEmptyExceptAux = emptyExceptAux(inputPanel);
-    // If it's key release and old information is not "empty", do the rest of
-    // "reset".
-    if (keyRelease && !newEmptyExceptAux) {
-        inputPanel.setAuxUp(Text());
-        inputPanel.setAuxDown(Text());
-    }
-    if (newEmptyExceptAux && lastMode_ != subMode()) {
+    if (lastMode_ != subMode()) {
         engine_->instance()->showInputMethodInformation(ic);
         ic->updateUserInterface(UserInterfaceComponent::StatusArea);
     }
 
-    if (!keyRelease || !oldEmptyExceptAux || !newEmptyExceptAux) {
+    if (!keyRelease) {
         ic->updateUserInterface(UserInterfaceComponent::InputPanel);
     }
 }
@@ -517,7 +515,7 @@ void RimeState::restore() {
     if (savedCurrentSchema_.empty()) {
         return;
     }
-    if (!engine_->schemas().count(savedCurrentSchema_)) {
+    if (!engine_->schemas().contains(savedCurrentSchema_)) {
         return;
     }
 
@@ -584,6 +582,7 @@ void RimeState::showChangedOptions() {
 
         // This is hard coded latin-mode.
         if (option == "ascii_mode") {
+            ic_.updateUserInterface(UserInterfaceComponent::StatusArea);
             continue;
         }
 
@@ -596,7 +595,7 @@ void RimeState::showChangedOptions() {
         if (actionIter == actions.end()) {
             continue;
         }
-        if (actionSet.count(actionIter->get())) {
+        if (actionSet.contains(actionIter->get())) {
             continue;
         }
         actionSet.insert(actionIter->get());
