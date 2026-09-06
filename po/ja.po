@@ -81,10 +81,6 @@ msgstr "デプロイ"
 #: src/rimeengine.h:142
 msgid "Deploy hotkey"
 msgstr "再配備のホットキー"
-#: src/rimeengine.h:58
-msgid "All"
-msgstr ""
-
 
 #: src/rimeengine.h:64
 msgid "Do not show"
@@ -193,10 +189,6 @@ msgstr "同期"
 #: src/rimeengine.h:146
 msgid "Synchronize hotkey"
 msgstr "同期のホットキー"
-#: src/rimeengine.h:73
-msgid "Clear"
-msgstr ""
-
 
 #: src/rimeengine.h:118
 msgid "Use latin mode name defined in schema"
