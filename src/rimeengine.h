@@ -157,7 +157,7 @@ FCITX_CONFIGURATION(
                          ShiftKeyBehavior::DisableFcitxToggle};
     Option<bool> latinModeNameFromSchema{
         this, "LatinModeNameFromSchema",
-        _("Use latin mode name defined in schema"), false});
+        _("Use latin mode name defined in schema"), false};);
 
 class RimeEngine final : public InputMethodEngineV4Point1 {
 public:
