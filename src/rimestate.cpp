@@ -396,6 +396,13 @@ void RimeState::updateUI(InputContext *ic, bool keyRelease) {
     if (!keyRelease) {
         inputPanel.reset();
     }
+    // Whether the panel had content before this update. On key release the
+    // panel is not reset, so this is the state currently shown to the user.
+    auto panelEmpty = [](const InputPanel &panel) {
+        return panel.preedit().empty() && panel.clientPreedit().empty() &&
+               (!panel.candidateList() || panel.candidateList()->empty());
+    };
+    bool oldPanelEmpty = panelEmpty(inputPanel);
 
     do {
         auto *api = engine_->api();
@@ -425,12 +432,26 @@ void RimeState::updateUI(InputContext *ic, bool keyRelease) {
     } while (false);
 
     ic->updatePreedit();
+    bool newPanelEmpty = panelEmpty(inputPanel);
+    // Complete the "reset" that was skipped for key release: clear stale aux
+    // (e.g. input method information) when the panel has content.
+    if (keyRelease && !newPanelEmpty) {
+        inputPanel.setAuxUp(Text());
+        inputPanel.setAuxDown(Text());
+    }
     if (lastMode_ != subMode()) {
         engine_->instance()->showInputMethodInformation(ic);
         ic->updateUserInterface(UserInterfaceComponent::StatusArea);
     }
 
-    if (!keyRelease) {
+    // Serialize the panel on key release when it has (or had) content.
+    // RimeCandidateList::tabLabels_/tabSpans_ are filled only when the
+    // frontend serializes the panel (via tabActions()); the do-block above
+    // replaced the candidate list with a fresh instance, so without
+    // re-serialization the visible tab strip refers to a list whose tab
+    // labels are empty, and tab taps silently no-op (only the clear button
+    // works, which re-serializes and "unlocks" the tabs).
+    if (!keyRelease || !oldPanelEmpty || !newPanelEmpty) {
         ic->updateUserInterface(UserInterfaceComponent::InputPanel);
     }
 }
