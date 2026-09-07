@@ -92,3 +92,7 @@ jobs:
           ctest --test-dir fcitx5-rime/build
       - name: CodeQL Analysis
         uses: github/codeql-action/analyze@v2
+        # Fork 自用：分析本体在日志里完成即可，上传结果到 Code Scanning
+        # 需要 security-events 写权限与已启用的 Advanced Security（fork 默认
+        # 都没有），上传必失败——标记 continue-on-error，失败不再红叉。
+        continue-on-error: true
