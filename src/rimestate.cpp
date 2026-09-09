@@ -235,7 +235,7 @@ void RimeState::keyEvent(KeyEvent &event) {
         engine_->instance()->resetCompose(ic);
     }
 
-    updateUI(ic, event.isRelease());
+    updateUI(ic);
     if (!event.isRelease() && !lastSchema.empty() &&
         lastSchema == currentSchema() && ic->inputPanel().empty() &&
         !changedOptions_.empty()) {
@@ -263,7 +263,7 @@ void RimeState::selectCandidate(InputContext *inputContext, int idx,
         inputContext->commitString(commit.text);
         api->free_commit(&commit);
     }
-    updateUI(inputContext, false);
+    updateUI(inputContext);
 }
 
 #ifndef FCITX_RIME_NO_DELETE_CANDIDATE
@@ -281,7 +281,7 @@ void RimeState::deleteCandidate(int idx, bool global) {
     } else {
         api->delete_candidate_on_current_page(session, idx);
     }
-    updateUI(&ic_, false);
+    updateUI(&ic_);
 }
 #endif
 
@@ -391,18 +391,12 @@ void RimeState::updatePreedit(InputContext *ic, const RimeContext &context) {
     }
 }
 
-void RimeState::updateUI(InputContext *ic, bool keyRelease) {
+void RimeState::updateUI(InputContext *ic) {
     auto &inputPanel = ic->inputPanel();
-    if (!keyRelease) {
+    // A small check to avoid reset overlay message upon key release.
+    if (!inputPanel.empty()) {
         inputPanel.reset();
     }
-    // Whether the panel had content before this update. On key release the
-    // panel is not reset, so this is the state currently shown to the user.
-    auto panelEmpty = [](const InputPanel &panel) {
-        return panel.preedit().empty() && panel.clientPreedit().empty() &&
-               (!panel.candidateList() || panel.candidateList()->empty());
-    };
-    bool oldPanelEmpty = panelEmpty(inputPanel);
 
     do {
         auto *api = engine_->api();
@@ -432,28 +426,12 @@ void RimeState::updateUI(InputContext *ic, bool keyRelease) {
     } while (false);
 
     ic->updatePreedit();
-    bool newPanelEmpty = panelEmpty(inputPanel);
-    // Complete the "reset" that was skipped for key release: clear stale aux
-    // (e.g. input method information) when the panel has content.
-    if (keyRelease && !newPanelEmpty) {
-        inputPanel.setAuxUp(Text());
-        inputPanel.setAuxDown(Text());
-    }
     if (lastMode_ != subMode()) {
         engine_->instance()->showInputMethodInformation(ic);
         ic->updateUserInterface(UserInterfaceComponent::StatusArea);
     }
 
-    // Serialize the panel on key release when it has (or had) content.
-    // RimeCandidateList::tabLabels_/tabSpans_ are filled only when the
-    // frontend serializes the panel (via tabActions()); the do-block above
-    // replaced the candidate list with a fresh instance, so without
-    // re-serialization the visible tab strip refers to a list whose tab
-    // labels are empty, and tab taps silently no-op (only the clear button
-    // works, which re-serializes and "unlocks" the tabs).
-    if (!keyRelease || !oldPanelEmpty || !newPanelEmpty) {
-        ic->updateUserInterface(UserInterfaceComponent::InputPanel);
-    }
+    ic->updateUserInterface(UserInterfaceComponent::InputPanel);
 }
 
 void RimeState::release() { session_.reset(); }
@@ -656,7 +634,7 @@ void RimeState::selectTab(int tabId, const std::vector<std::string> &labels,
         return;
     }
     api->select_tab(session, 0, labels[tabId].c_str(), spans[tabId]);
-    updateUI(&ic_, false);
+    updateUI(&ic_);
 }
 
 void RimeState::clearTabs() {
@@ -672,6 +650,6 @@ void RimeState::clearTabs() {
         return;
     }
     api->clear_tabs(session);
-    updateUI(&ic_, false);
+    updateUI(&ic_);
 }
 } // namespace fcitx::rime
