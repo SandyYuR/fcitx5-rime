@@ -634,20 +634,4 @@ void RimeState::selectTab(int tabId, const std::vector<std::string> &labels,
     api->select_tab(session, 0, labels[tabId].c_str(), spans[tabId]);
     updateUI(&ic_);
 }
-
-void RimeState::clearTabs() {
-    auto *api = engine_->api();
-    if (api->is_maintenance_mode()) {
-        return;
-    }
-    auto session = this->session(false);
-    if (!session) {
-        return;
-    }
-    if (!RIME_API_AVAILABLE(api, clear_tabs)) {
-        return;
-    }
-    api->clear_tabs(session);
-    updateUI(&ic_);
-}
 } // namespace fcitx::rime

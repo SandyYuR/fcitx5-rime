@@ -125,7 +125,6 @@ private:
     mutable std::vector<std::unique_ptr<RimeGlobalCandidateWord>>
         globalCandidateWords_;
 
-    static constexpr int TAB_ACTION_CLEAR = -1;
     std::vector<std::string> tabLabels_;
     std::vector<size_t> tabSpans_;
     std::vector<CandidateAction> tabActions_;

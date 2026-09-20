@@ -225,16 +225,9 @@ std::span<const CandidateAction> RimeCandidateList::tabActions() {
         tabActions_.push_back(std::move(action));
     }
 
-    CandidateAction separator;
-    separator.setId(-2);
-    separator.setSeparator(true);
-    tabActions_.push_back(std::move(separator));
-
-    CandidateAction clearAction;
-    clearAction.setId(TAB_ACTION_CLEAR);
-    clearAction.setText("清除");
-    tabActions_.push_back(std::move(clearAction));
-
+    // 不再附加分隔符与“清除”按钮：两者原本只为把“清除”固定在辅助栏
+    // pinned 区（分隔符之后），会与音节 tab 争抢纵向辅助栏的可视高度。
+    // 移除后全部 tab 都落在 scrollable 区，由辅助栏自行分配高度。
     return tabActions_;
 }
 
@@ -243,10 +236,6 @@ void RimeCandidateList::triggerTabAction(int id) {
     if (!state) {
         return;
     }
-    if (id == TAB_ACTION_CLEAR) {
-        state->clearTabs();
-    } else {
-        state->selectTab(id, tabLabels_, tabSpans_);
-    }
+    state->selectTab(id, tabLabels_, tabSpans_);
 }
 } // namespace fcitx::rime
