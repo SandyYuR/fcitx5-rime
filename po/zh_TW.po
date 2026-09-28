@@ -96,6 +96,11 @@ msgid "Deploy now"
 msgstr "立即重新部署"
 
 
+#: src/rimeengine.cpp:937
+msgid "Deploying..."
+msgstr "正在部署……"
+
+
 #: src/rimeengine.h:79
 msgid "Disable Fcitx Shift_L toggle"
 msgstr "停用 Fcitx Shift_L 切換"

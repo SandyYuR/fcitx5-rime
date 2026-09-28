@@ -813,6 +813,13 @@ void RimeEngine::activate(const InputMethodEntry & /*entry*/,
     if (auto *state = this->state(ic)) {
         state->activate();
     }
+    // A cold-start deployment begins before this input context has focus, so
+    // the "deploying" hint set back then reached nobody. Show it now, if the
+    // deployment is still running. Nothing is being cleared on this path, so
+    // there is no previous message to hand over.
+    if (!deployStatusMessage_.empty()) {
+        applyDeployStatusMessage(/*previous=*/std::string());
+    }
 }
 
 void RimeEngine::deactivate(const InputMethodEntry &entry,
@@ -867,6 +874,13 @@ void RimeEngine::reset(const InputMethodEntry & /*entry*/,
     state->clear();
     instance_->resetCompose(inputContext);
     inputContext->inputPanel().reset();
+    // The reset above also dropped the "deploying" hint (reset() clears the
+    // overlay message). Put it back while a deployment is still running, so
+    // that focusing another field mid-deploy does not silently lose the hint.
+    if (!deployStatusMessage_.empty()) {
+        inputContext->inputPanel().setOverlayMessage(
+            Text(deployStatusMessage_));
+    }
     inputContext->updatePreedit();
     inputContext->updateUserInterface(UserInterfaceComponent::InputPanel);
 }
@@ -920,7 +934,16 @@ void RimeEngine::notify(RimeSessionId session, const std::string &messageType,
         if (messageValue == "start") {
             message = _("Rime is under maintenance. It may take a few "
                         "seconds. Please wait until it is finished...");
+            // Show the wait state inside the input panel. A deployment is why
+            // the keyboard will not take keys for a moment, so the hint
+            // belongs where the user is already looking. It also covers the
+            // automatic deployments (cold start), which do not pass through
+            // the notification gate at all - a toast there would either never
+            // appear or, if the gate were opened, fire on every cold start and
+            // outlive the keyboard.
+            setDeployStatusMessage(_("Deploying..."));
         } else if (messageValue == "success") {
+            setDeployStatusMessage("");
             message = _("Rime is ready.");
             if (!api_->is_maintenance_mode()) {
                 if (needRefreshAppOption_) {
@@ -933,6 +956,7 @@ void RimeEngine::notify(RimeSessionId session, const std::string &messageType,
             refreshStatusArea(0);
             blockMessage = true;
         } else if (messageValue == "failure") {
+            setDeployStatusMessage("");
             needRefreshAppOption_ = false;
             message = _("Rime has encountered an error. "
                         "See log for details.");
@@ -1036,6 +1060,60 @@ void RimeEngine::sync(bool userTriggered) {
         allowNotification();
     }
     api_->sync_user_data();
+}
+
+void RimeEngine::setDeployStatusMessage(const std::string &message) {
+    if (message == deployStatusMessage_) {
+        return;
+    }
+    const std::string previous = deployStatusMessage_;
+    deployStatusMessage_ = message;
+    applyDeployStatusMessage(previous);
+}
+
+void RimeEngine::applyDeployStatusMessage(const std::string &previous) {
+    // Show "deploying" inside the input panel instead of a system toast. The
+    // panel's overlay message is forwarded by the frontend as aux-up while the
+    // panel is otherwise empty, which is exactly the state during a deploy (no
+    // preedit, no candidates).
+    //
+    // A toast was tried before and is wrong here: it is not tied to the
+    // keyboard's lifetime, it can pop up over a different app, and because
+    // deployments also happen automatically on cold start it would fire on
+    // every launch.
+    //
+    // The message lives in deployStatusMessage_ and is re-applied from
+    // activate(), because a cold-start deployment usually begins before any
+    // input context has focus - at that moment foreachFocused visits nothing,
+    // and the hint would otherwise never be seen.
+    instance_->inputContextManager().foreachFocused(
+        [this, &previous](InputContext *ic) {
+            auto &panel = ic->inputPanel();
+            if (!deployStatusMessage_.empty()) {
+                // Never overwrite real content: when the panel holds a preedit
+                // or candidates the user is mid-composition and the panel is
+                // already showing something useful.
+                if (!panel.empty()) {
+                    return true;
+                }
+                panel.setOverlayMessage(Text(deployStatusMessage_));
+                ic->updateUserInterface(UserInterfaceComponent::InputPanel);
+                return true;
+            }
+            // Clearing. Only remove the message we put there: another
+            // component may have replaced the overlay in the meantime (e.g.
+            // the input method switch hint uses the same field), and that one
+            // is not ours to delete.
+            if (previous.empty()) {
+                return true;
+            }
+            const auto &current = panel.overlayMessage();
+            if (current.size() == 1 && current.stringAt(0) == previous) {
+                panel.setOverlayMessage(Text());
+                ic->updateUserInterface(UserInterfaceComponent::InputPanel);
+            }
+            return true;
+        });
 }
 
 void RimeEngine::updateActionsForSchema(const std::string &schema) {

@@ -86,6 +86,11 @@ msgid "Deploy now"
 msgstr ""
 
 
+#: src/rimeengine.cpp:937
+msgid "Deploying..."
+msgstr ""
+
+
 #: src/rimeengine.h:79
 msgid "Disable Fcitx Shift_L toggle"
 msgstr ""

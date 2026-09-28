@@ -234,6 +234,8 @@ private:
                            std::string_view value);
     void notify(RimeSessionId session, const std::string &type,
                 const std::string &value);
+    void setDeployStatusMessage(const std::string &message);
+    void applyDeployStatusMessage(const std::string &previous);
     void releaseAllSession(bool snapshot = false);
     void updateAppOptions();
     void refreshStatusArea(InputContext &ic);
@@ -262,6 +264,10 @@ private:
     std::string allowNotificationType_;
     FactoryFor<RimeState> factory_;
     bool needRefreshAppOption_ = false;
+    // Non-empty while a deployment is running. It may start before any input
+    // context has focus (the usual cold start), so the text is remembered and
+    // re-applied to an input context that gains focus later.
+    std::string deployStatusMessage_;
 
     std::unique_ptr<Action> imAction_;
     SimpleAction separatorAction_;
