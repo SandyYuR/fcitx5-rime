@@ -181,10 +181,23 @@ void RimeState::keyEvent(KeyEvent &event) {
 
     auto *api = engine_->api();
     if (api->is_maintenance_mode()) {
+        // Rime is deploying and cannot process keys. Accept (swallow) them
+        // instead of leaving them unhandled: an unhandled key is handed back
+        // to the frontend, whose fallback commits it to the editor as a plain
+        // character, so letters typed during a deployment used to land in the
+        // text field as literal garbage ("hhh") instead of being ignored.
+        // Press and release are both swallowed, so the editor never sees a
+        // key-up whose key-down it did not get.
+        event.filterAndAccept();
         return;
     }
     auto session = this->session();
     if (!session) {
+        // No usable Rime session. Same reasoning as above: unhandled keys
+        // would be committed to the editor as literal text. A keyboard that
+        // briefly ignores input is much less surprising than one that types
+        // garbage the user has to delete.
+        event.filterAndAccept();
         return;
     }
 
