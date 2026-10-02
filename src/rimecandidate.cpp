@@ -8,6 +8,7 @@
 #include "rimeengine.h"
 #include <cstring>
 #include <fcitx-utils/log.h>
+#include <fcitx-utils/utf8.h>
 #include <fcitx/candidatelist.h>
 #include <memory>
 #include <rime_api.h>
@@ -210,13 +211,23 @@ std::span<const CandidateAction> RimeCandidateList::tabActions() {
     }
 
     for (size_t i = 0; i < count; i++) {
+        // get_input_tabs 会把 TableTranslator 码表里的多字节 code（例如万象
+        // mixedcode 的带声调拼音，ā = C4 81）按字节而非按字符切出前缀作为
+        // 音节 tab label，可能切断多字节序列、留下孤立续字节（墓碑里的
+        // 0x81）。这种 label 既不是合法 UTF-8（到 JNI 侧只能被净化成 U+FFFD
+        // 乱码），回传给 select_tab 也是坏约束、无实际意义，直接丢弃不进列表。
+        if (labels[i] == nullptr || !utf8::validate(std::string(labels[i]))) {
+            continue;
+        }
         tabLabels_.push_back(labels[i]);
         tabSpans_.push_back(spans[i]);
     }
 
     api->free_input_tabs(labels, spans, sources, count);
 
-    for (size_t i = 0; i < count; i++) {
+    // id 必须与过滤后的 tabLabels_/tabSpans_ 下标对齐：triggerTabAction(id)
+    // 会以 id 为下标取 tabLabels_[id]/tabSpans_[id] 回传 selectTab。
+    for (size_t i = 0; i < tabLabels_.size(); i++) {
         CandidateAction action;
         action.setId(static_cast<int>(i));
         action.setText(tabLabels_[i]);
