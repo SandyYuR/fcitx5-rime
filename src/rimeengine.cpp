@@ -442,20 +442,18 @@ void RimeEngine::rimeStart(bool fullcheck) {
     RIME_INFO() << "Rime Start: fullcheck=" << fullcheck
                 << ", currentDataDir=" << currentDataDir_;
 
-    auto userDir =
-        StandardPaths::global().userDirectory(StandardPathsType::PkgData) /
-        currentDataDir_;
-    RIME_DEBUG() << "Rime data directory: " << userDir;
-    if (!fs::makePath(userDir)) {
-        if (!fs::isdir(userDir)) {
-            RIME_ERROR() << "Failed to create user directory: " << userDir;
+    const auto userDirPath = resolveDataDir(currentDataDir_);
+    RIME_DEBUG() << "Rime data directory: " << userDirPath;
+    if (!fs::makePath(userDirPath)) {
+        if (!fs::isdir(userDirPath)) {
+            RIME_ERROR() << "Failed to create user directory: " << userDirPath;
         }
     }
 
     RIME_STRUCT(RimeTraits, fcitx_rime_traits);
     fcitx_rime_traits.shared_data_dir = sharedDataDir_.c_str();
     fcitx_rime_traits.app_name = "rime.fcitx-rime";
-    fcitx_rime_traits.user_data_dir = userDir.c_str();
+    fcitx_rime_traits.user_data_dir = userDirPath.c_str();
     fcitx_rime_traits.distribution_name = "Rime";
     fcitx_rime_traits.distribution_code_name = "fcitx-rime";
     fcitx_rime_traits.distribution_version = FCITX_RIME_VERSION;
@@ -537,10 +535,19 @@ void RimeEngine::setSubConfig(const std::string &path,
             config.get("Name") ? config.get("Name")->value() : "";
         const std::string newName =
             config.get("NewName") ? config.get("NewName")->value() : "";
+        const std::string externalPath =
+            config.get("ExternalPath") ? config.get("ExternalPath")->value()
+                                       : "";
         std::string error;
         bool ok = false;
         if (action == "create") {
-            ok = createDataDir(name, &error);
+            RIME_INFO() << "Create data dir: name=" << name
+                        << ", externalPath=" << externalPath;
+            if (externalPath.empty()) {
+                ok = createDataDir(name, &error);
+            } else {
+                ok = createExternalDataDir(name, externalPath, &error);
+            }
         } else if (action == "rename") {
             ok = renameDataDir(name, newName, &error);
         } else if (action == "delete") {
@@ -635,6 +642,14 @@ const Configuration *RimeEngine::getSubConfig(const std::string &path) const {
     if (isProfileManagerPath(path)) {
         dataDirManagerConfig_.current.setValue(currentDataDir_);
         dataDirManagerConfig_.profiles.setValue(joinLines(dataDirs_));
+        // Use | instead of TAB as separator: fcitx ini escapes TAB in values,
+        // which would break parsing on the next load.
+        std::vector<std::string> pathLines;
+        pathLines.reserve(dataDirs_.size());
+        for (const auto &name : dataDirs_) {
+            pathLines.push_back(name + "|" + resolveDataDir(name));
+        }
+        dataDirManagerConfig_.paths.setValue(joinLines(pathLines));
         dataDirManagerConfig_.error.setValue(dataDirLastError_);
         return &dataDirManagerConfig_;
     }
@@ -1208,10 +1223,19 @@ std::string RimeEngine::dataRootDir() const {
         .string();
 }
 
+std::string RimeEngine::resolveDataDir(const std::string &name) const {
+    const auto iter = externalDataDirs_.find(name);
+    if (iter != externalDataDirs_.end() && !iter->second.empty()) {
+        return iter->second;
+    }
+    return (std::filesystem::path(dataRootDir()) / name).string();
+}
+
 void RimeEngine::loadDataDirState() {
     readAsIni(dataDirStateConfig_, "conf/rime-data-dir.conf");
 
     dataDirs_.clear();
+    externalDataDirs_.clear();
     const auto parsed = splitLines(*dataDirStateConfig_.profiles);
     for (const auto &name : parsed) {
         std::string ignored;
@@ -1224,6 +1248,29 @@ void RimeEngine::loadDataDirState() {
     if (dataDirs_.empty()) {
         dataDirs_.push_back("rime");
     }
+
+    // Restore external (shared storage) path registrations. Invalid names or
+    // non-absolute paths are dropped silently, like unknown profiles above.
+    // Format: name|absolute-path (| instead of TAB because ini escapes TAB).
+    for (const auto &line : splitLines(*dataDirStateConfig_.externalPaths)) {
+        const auto sep = line.find('|');
+        if (sep == std::string::npos || sep == 0 || sep + 1 >= line.size()) {
+            continue;
+        }
+        const std::string name = line.substr(0, sep);
+        const std::string path = line.substr(sep + 1);
+        std::string ignored;
+        if (!validateDataDirName(name, &ignored) || path.front() != '/') {
+            continue;
+        }
+        externalDataDirs_[name] = path;
+        if (std::find(dataDirs_.begin(), dataDirs_.end(), name) ==
+            dataDirs_.end()) {
+            dataDirs_.push_back(name);
+        }
+    }
+    RIME_INFO() << "Loaded data dir profiles: " << dataDirs_.size()
+                << ", external=" << externalDataDirs_.size();
 
     auto current = trimAscii(*dataDirStateConfig_.current);
     if (current.empty()) {
@@ -1239,13 +1286,25 @@ void RimeEngine::loadDataDirState() {
     }
     currentDataDir_ = std::move(current);
 
-    ensureDataDirExists(currentDataDir_, &ignored);
+    if (externalDataDirs_.count(currentDataDir_)) {
+        std::error_code ec;
+        std::filesystem::create_directories(
+            std::filesystem::path(resolveDataDir(currentDataDir_)), ec);
+    } else {
+        ensureDataDirExists(currentDataDir_, &ignored);
+    }
     saveDataDirState();
 }
 
 void RimeEngine::saveDataDirState() {
     dataDirStateConfig_.current.setValue(currentDataDir_);
     dataDirStateConfig_.profiles.setValue(joinLines(dataDirs_));
+    std::vector<std::string> externalLines;
+    externalLines.reserve(externalDataDirs_.size());
+    for (const auto &[name, path] : externalDataDirs_) {
+        externalLines.push_back(name + "|" + path);
+    }
+    dataDirStateConfig_.externalPaths.setValue(joinLines(externalLines));
     safeSaveAsIni(dataDirStateConfig_, "conf/rime-data-dir.conf");
 }
 
@@ -1325,6 +1384,40 @@ bool RimeEngine::createDataDir(const std::string &name, std::string *error) {
     return true;
 }
 
+bool RimeEngine::createExternalDataDir(const std::string &name,
+                                       const std::string &externalPath,
+                                       std::string *error) {
+    if (!validateDataDirName(name, error)) {
+        return false;
+    }
+    if (std::find(dataDirs_.begin(), dataDirs_.end(), name) !=
+        dataDirs_.end()) {
+        if (error) {
+            *error = "Directory already exists.";
+        }
+        return false;
+    }
+    if (externalPath.empty() || externalPath.front() != '/') {
+        if (error) {
+            *error = "External path must be an absolute path.";
+        }
+        return false;
+    }
+    const std::filesystem::path dir(externalPath);
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if (ec) {
+        if (error) {
+            *error = "Failed to create directory: " + externalPath;
+        }
+        return false;
+    }
+    externalDataDirs_[name] = externalPath;
+    dataDirs_.push_back(name);
+    saveDataDirState();
+    return true;
+}
+
 bool RimeEngine::renameDataDir(const std::string &from, const std::string &to,
                                std::string *error) {
     if (!validateDataDirName(from, error) || !validateDataDirName(to, error)) {
@@ -1345,18 +1438,26 @@ bool RimeEngine::renameDataDir(const std::string &from, const std::string &to,
     }
 
     const auto root = std::filesystem::path(dataRootDir());
-    const auto fromPath = root / from;
-    const auto toPath = root / to;
-    std::error_code ec;
-    if (std::filesystem::exists(fromPath, ec)) {
-        ec.clear();
-        std::filesystem::rename(fromPath, toPath, ec);
-        if (ec) {
-            if (error) {
-                *error = "Failed to rename directory.";
+    // External profiles have no directory under the data root to rename;
+    // only the registered name changes and the path mapping follows.
+    const bool fromIsExternal = externalDataDirs_.count(from) != 0;
+    if (!fromIsExternal) {
+        const auto fromPath = root / from;
+        const auto toPath = root / to;
+        std::error_code ec;
+        if (std::filesystem::exists(fromPath, ec)) {
+            ec.clear();
+            std::filesystem::rename(fromPath, toPath, ec);
+            if (ec) {
+                if (error) {
+                    *error = "Failed to rename directory.";
+                }
+                return false;
             }
-            return false;
         }
+    } else {
+        externalDataDirs_[to] = externalDataDirs_[from];
+        externalDataDirs_.erase(from);
     }
 
     *fromIter = to;
@@ -1396,14 +1497,21 @@ bool RimeEngine::deleteDataDir(const std::string &name, std::string *error) {
         return false;
     }
 
-    const auto dir = std::filesystem::path(dataRootDir()) / name;
-    std::error_code ec;
-    std::filesystem::remove_all(dir, ec);
-    if (ec) {
-        if (error) {
-            *error = "Failed to delete directory.";
+    const auto externalIter = externalDataDirs_.find(name);
+    if (externalIter != externalDataDirs_.end()) {
+        // External directories live in shared storage owned by the user;
+        // deleting the profile only unregisters it, files are kept.
+        externalDataDirs_.erase(externalIter);
+    } else {
+        const auto dir = std::filesystem::path(dataRootDir()) / name;
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+        if (ec) {
+            if (error) {
+                *error = "Failed to delete directory.";
+            }
+            return false;
         }
-        return false;
     }
     dataDirs_.erase(iter);
     if (dataDirs_.empty()) {
@@ -1425,7 +1533,17 @@ bool RimeEngine::switchDataDir(const std::string &name, bool fullcheck,
         }
         return false;
     }
-    if (!ensureDataDirExists(name, error)) {
+    if (externalDataDirs_.count(name)) {
+        const auto dir = std::filesystem::path(resolveDataDir(name));
+        std::error_code ec;
+        std::filesystem::create_directories(dir, ec);
+        if (ec) {
+            if (error) {
+                *error = "Failed to create directory: " + dir.string();
+            }
+            return false;
+        }
+    } else if (!ensureDataDirExists(name, error)) {
         return false;
     }
     if (name == currentDataDir_) {

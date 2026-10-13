@@ -91,13 +91,19 @@ FCITX_CONFIGURATION(RimeDataDirStateConfig,
                     Option<std::string> current{this, "Current", _("Current"),
                                                 "rime"};
                     Option<std::string> profiles{this, "Profiles",
-                                                 _("Profiles"), "rime"};);
+                                                 _("Profiles"), "rime"};
+                    // name<TAB>absolute-path lines for profiles registered
+                    // with an external (shared storage) directory.
+                    Option<std::string> externalPaths{this, "ExternalPaths",
+                                                      _("External Paths"), ""};);
 
 FCITX_CONFIGURATION(RimeDataDirManagerConfig,
                     Option<std::string> current{this, "Current", _("Current"),
                                                 ""};
                     Option<std::string> profiles{this, "Profiles",
                                                  _("Profiles"), ""};
+                    // name<TAB>resolved-absolute-path lines, one per profile.
+                    Option<std::string> paths{this, "Paths", _("Paths"), ""};
                     Option<std::string> error{this, "Error", _("Error"), ""};);
 
 FCITX_CONFIGURATION(
@@ -202,6 +208,9 @@ public:
     std::vector<std::string> listDataDirs() const;
     std::string currentDataDir() const { return currentDataDir_; }
     bool createDataDir(const std::string &name, std::string *error = nullptr);
+    bool createExternalDataDir(const std::string &name,
+                               const std::string &externalPath,
+                               std::string *error = nullptr);
     bool renameDataDir(const std::string &from, const std::string &to,
                        std::string *error = nullptr);
     bool deleteDataDir(const std::string &name, std::string *error = nullptr);
@@ -251,6 +260,7 @@ private:
     void loadDataDirState();
     void saveDataDirState();
     std::string dataRootDir() const;
+    std::string resolveDataDir(const std::string &name) const;
 
     bool constructed_ = false;
     std::string sharedDataDir_;
@@ -282,6 +292,9 @@ private:
     mutable RimeDataDirManagerConfig dataDirManagerConfig_;
     RimeDataDirStateConfig dataDirStateConfig_;
     std::vector<std::string> dataDirs_;
+    // Profiles registered with an external (shared storage) directory:
+    // profile name -> absolute path. Such profiles bypass dataRootDir().
+    std::unordered_map<std::string, std::string> externalDataDirs_;
     std::string currentDataDir_ = "rime";
     std::string dataDirLastError_;
 
