@@ -87,6 +87,7 @@ jobs:
         uses: fcitx/github-actions@cmake
         with:
           path: fcitx5-rime
+          cmake-option: -DENABLE_DATA_DIR_TESTS=ON
       - name: Test
         run: |
           ctest --test-dir fcitx5-rime/build

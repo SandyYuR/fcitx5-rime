@@ -87,24 +87,25 @@ FCITX_CONFIG_ENUM_NAME_WITH_I18N(ShiftKeyBehavior, N_("Auto"),
 FCITX_CONFIGURATION(RimeSchemaSelectorConfig,
                     Option<std::string> items{this, "Items", _("Items"), ""};);
 
-FCITX_CONFIGURATION(RimeDataDirStateConfig,
-                    Option<std::string> current{this, "Current", _("Current"),
-                                                "rime"};
-                    Option<std::string> profiles{this, "Profiles",
-                                                 _("Profiles"), "rime"};
-                    // name<TAB>absolute-path lines for profiles registered
-                    // with an external (shared storage) directory.
-                    Option<std::string> externalPaths{this, "ExternalPaths",
-                                                      _("External Paths"), ""};);
+FCITX_CONFIGURATION(
+    RimeDataDirStateConfig,
+    Option<std::string> current{this, "Current", _("Current"), "rime"};
+    Option<std::string> profiles{this, "Profiles", _("Profiles"), "rime"};
+    // Legacy name|absolute-path registrations.
+    Option<std::string> externalPaths{this, "ExternalPaths",
+                                      _("External Paths"), ""};
+    // Hex-encoded UTF-8 name|path pairs, safe for any name.
+    Option<std::string> externalPathsV2{this, "ExternalPathsV2",
+                                        _("External Paths"), ""};);
 
-FCITX_CONFIGURATION(RimeDataDirManagerConfig,
-                    Option<std::string> current{this, "Current", _("Current"),
-                                                ""};
-                    Option<std::string> profiles{this, "Profiles",
-                                                 _("Profiles"), ""};
-                    // name<TAB>resolved-absolute-path lines, one per profile.
-                    Option<std::string> paths{this, "Paths", _("Paths"), ""};
-                    Option<std::string> error{this, "Error", _("Error"), ""};);
+FCITX_CONFIGURATION(
+    RimeDataDirManagerConfig,
+    Option<std::string> current{this, "Current", _("Current"), ""};
+    Option<std::string> profiles{this, "Profiles", _("Profiles"), ""};
+    // Keep the legacy display field for old app versions.
+    Option<std::string> paths{this, "Paths", _("Paths"), ""};
+    Option<std::string> pathsV2{this, "PathsV2", _("Paths"), ""};
+    Option<std::string> error{this, "Error", _("Error"), ""};);
 
 FCITX_CONFIGURATION(
     RimeEngineConfig,

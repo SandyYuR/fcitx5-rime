@@ -45,6 +45,15 @@ add_subdirectory(po)
 add_subdirectory(src)
 add_subdirectory(data)
 
+option(ENABLE_DATA_DIR_TESTS "Build data directory persistence regression tests" OFF)
+if (ENABLE_DATA_DIR_TESTS)
+    enable_testing()
+    add_executable(datadircodec_test tests/datadircodec_test.cpp)
+    target_include_directories(datadircodec_test PRIVATE src)
+    target_compile_features(datadircodec_test PRIVATE cxx_std_17)
+    add_test(NAME datadircodec COMMAND datadircodec_test)
+endif()
+
 fcitx5_translate_desktop_file(org.fcitx.Fcitx5.Addon.Rime.metainfo.xml.in
                               org.fcitx.Fcitx5.Addon.Rime.metainfo.xml XML)
 

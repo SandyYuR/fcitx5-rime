@@ -5,6 +5,7 @@
  */
 
 #include "rimeengine.h"
+#include "datadircodec.h"
 #include "notifications_public.h"
 #include "rimeaction.h"
 #include "rimestate.h"
@@ -54,6 +55,7 @@
 #include <string_view>
 #include <thread>
 #include <tuple>
+#include <unistd.h>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -443,10 +445,11 @@ void RimeEngine::rimeStart(bool fullcheck) {
                 << ", currentDataDir=" << currentDataDir_;
 
     const auto userDirPath = resolveDataDir(currentDataDir_);
-    RIME_DEBUG() << "Rime data directory: " << userDirPath;
+    RIME_DEBUG() << "Rime data directory: external="
+                 << (externalDataDirs_.count(currentDataDir_) != 0);
     if (!fs::makePath(userDirPath)) {
         if (!fs::isdir(userDirPath)) {
-            RIME_ERROR() << "Failed to create user directory: " << userDirPath;
+            RIME_ERROR() << "Failed to create Rime user directory";
         }
     }
 
@@ -541,8 +544,8 @@ void RimeEngine::setSubConfig(const std::string &path,
         std::string error;
         bool ok = false;
         if (action == "create") {
-            RIME_INFO() << "Create data dir: name=" << name
-                        << ", externalPath=" << externalPath;
+            RIME_INFO() << "Create data directory: external="
+                        << !externalPath.empty();
             if (externalPath.empty()) {
                 ok = createDataDir(name, &error);
             } else {
@@ -645,11 +648,16 @@ const Configuration *RimeEngine::getSubConfig(const std::string &path) const {
         // Use | instead of TAB as separator: fcitx ini escapes TAB in values,
         // which would break parsing on the next load.
         std::vector<std::string> pathLines;
+        std::vector<std::string> encodedPathLines;
         pathLines.reserve(dataDirs_.size());
+        encodedPathLines.reserve(dataDirs_.size());
         for (const auto &name : dataDirs_) {
             pathLines.push_back(name + "|" + resolveDataDir(name));
+            encodedPathLines.push_back(
+                datadir::encodePair(name, resolveDataDir(name)));
         }
         dataDirManagerConfig_.paths.setValue(joinLines(pathLines));
+        dataDirManagerConfig_.pathsV2.setValue(joinLines(encodedPathLines));
         dataDirManagerConfig_.error.setValue(dataDirLastError_);
         return &dataDirManagerConfig_;
     }
@@ -1249,18 +1257,26 @@ void RimeEngine::loadDataDirState() {
         dataDirs_.push_back("rime");
     }
 
-    // Restore external (shared storage) path registrations. Invalid names or
-    // non-absolute paths are dropped silently, like unknown profiles above.
-    // Format: name|absolute-path (| instead of TAB because ini escapes TAB).
-    for (const auto &line : splitLines(*dataDirStateConfig_.externalPaths)) {
-        const auto sep = line.find('|');
-        if (sep == std::string::npos || sep == 0 || sep + 1 >= line.size()) {
+    // Prefer the escaped format; migrate old registrations on the next save.
+    const bool encoded = !dataDirStateConfig_.externalPathsV2->empty();
+    const auto registrations = encoded ? *dataDirStateConfig_.externalPathsV2
+                                       : *dataDirStateConfig_.externalPaths;
+    std::istringstream registrationStream(registrations);
+    std::string line;
+    while (std::getline(registrationStream, line)) {
+        // Whitespace may be part of a legacy directory's actual filename.
+        if (encoded) {
+            line = trimAscii(std::move(line));
+        }
+        auto entry = encoded ? datadir::decodePair(line)
+                             : datadir::decodeLegacyPair(line, dataDirs_);
+        if (!entry) {
             continue;
         }
-        const std::string name = line.substr(0, sep);
-        const std::string path = line.substr(sep + 1);
+        const auto &[name, path] = *entry;
         std::string ignored;
-        if (!validateDataDirName(name, &ignored) || path.front() != '/') {
+        if (!validateDataDirName(name, &ignored) || path.empty() ||
+            path.front() != '/' || path.find('\0') != std::string::npos) {
             continue;
         }
         externalDataDirs_[name] = path;
@@ -1300,11 +1316,20 @@ void RimeEngine::saveDataDirState() {
     dataDirStateConfig_.current.setValue(currentDataDir_);
     dataDirStateConfig_.profiles.setValue(joinLines(dataDirs_));
     std::vector<std::string> externalLines;
+    std::vector<std::string> encodedExternalLines;
     externalLines.reserve(externalDataDirs_.size());
+    encodedExternalLines.reserve(externalDataDirs_.size());
     for (const auto &[name, path] : externalDataDirs_) {
-        externalLines.push_back(name + "|" + path);
+        encodedExternalLines.push_back(datadir::encodePair(name, path));
+        // Only write entries the original reader can decode losslessly.
+        if (name.find('|') == std::string::npos &&
+            path.find_first_of("\n\r") == std::string::npos) {
+            externalLines.push_back(name + "|" + path);
+        }
     }
     dataDirStateConfig_.externalPaths.setValue(joinLines(externalLines));
+    dataDirStateConfig_.externalPathsV2.setValue(
+        joinLines(encodedExternalLines));
     safeSaveAsIni(dataDirStateConfig_, "conf/rime-data-dir.conf");
 }
 
@@ -1356,7 +1381,7 @@ bool RimeEngine::ensureDataDirExists(const std::string &name,
     std::filesystem::create_directories(dir, ec);
     if (ec) {
         if (error) {
-            *error = "Failed to create directory: " + dir.string();
+            *error = "Failed to create data directory.";
         }
         return false;
     }
@@ -1397,7 +1422,8 @@ bool RimeEngine::createExternalDataDir(const std::string &name,
         }
         return false;
     }
-    if (externalPath.empty() || externalPath.front() != '/') {
+    if (externalPath.empty() || externalPath.front() != '/' ||
+        externalPath.find('\0') != std::string::npos) {
         if (error) {
             *error = "External path must be an absolute path.";
         }
@@ -1408,7 +1434,13 @@ bool RimeEngine::createExternalDataDir(const std::string &name,
     std::filesystem::create_directories(dir, ec);
     if (ec) {
         if (error) {
-            *error = "Failed to create directory: " + externalPath;
+            *error = "Failed to create external data directory.";
+        }
+        return false;
+    }
+    if (::access(dir.c_str(), R_OK | W_OK | X_OK) != 0) {
+        if (error) {
+            *error = "External data directory is not readable and writable.";
         }
         return false;
     }
@@ -1539,7 +1571,14 @@ bool RimeEngine::switchDataDir(const std::string &name, bool fullcheck,
         std::filesystem::create_directories(dir, ec);
         if (ec) {
             if (error) {
-                *error = "Failed to create directory: " + dir.string();
+                *error = "Failed to create external data directory.";
+            }
+            return false;
+        }
+        if (::access(dir.c_str(), R_OK | W_OK | X_OK) != 0) {
+            if (error) {
+                *error =
+                    "External data directory is not readable and writable.";
             }
             return false;
         }
